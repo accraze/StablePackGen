@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Dict, List, Tuple, Any, TypedDict, Optional
 from typing_extensions import Required
 import anthropic
@@ -189,109 +190,27 @@ class AudioGenerator:
             print(f"Error type: {type(e)}")
             raise
 
+from genre_templates import get_template_for_genre, get_available_genres
+
 def generate_sample_pack_plan(genre: str = "techno") -> List[Dict[str, Any]]:
-    """Generate a plan for a complete sample pack."""
-    current_dir = os.getcwd()
-    sample_definitions = [
-        # Kicks
-        {
-            "prompt": "Deep, punchy techno kick drum with strong sub frequencies and tight attack",
-            "duration": 1.0,
-            "output_path": os.path.join(current_dir, "kicks", "kick_sub_punch.wav"),
-            "category": "kicks"
-        },
-        {
-            "prompt": "Hard, distorted kick drum with mid-range presence and aggressive character",
-            "duration": 1.0,
-            "output_path": os.path.join(current_dir, "kicks", "kick_hard_dist.wav"),
-            "category": "kicks"
-        },
-        # Snares
-        {
-            "prompt": "Snappy electronic snare with crisp transient and medium decay",
-            "duration": 1.0,
-            "output_path": os.path.join(current_dir, "snares", "snare_snap.wav"),
-            "category": "snares"
-        },
-        {
-            "prompt": "Processed acoustic snare with room reverb and parallel compression",
-            "duration": 1.0,
-            "output_path": os.path.join(current_dir, "snares", "snare_room.wav"),
-            "category": "snares"
-        },
-        # Hi-hats
-        {
-            "prompt": "Tight closed hi-hat with metallic character",
-            "duration": 0.5,
-            "output_path": os.path.join(current_dir, "hats", "hat_closed.wav"),
-            "category": "hats"
-        },
-        {
-            "prompt": "Open hi-hat with long decay and bright character",
-            "duration": 1.0,
-            "output_path": os.path.join(current_dir, "hats", "hat_open.wav"),
-            "category": "hats"
-        },
-        # Percussion
-        {
-            "prompt": "Crisp clap with medium room reverb",
-            "duration": 1.0,
-            "output_path": os.path.join(current_dir, "percussion", "clap_room.wav"),
-            "category": "percussion"
-        },
-        {
-            "prompt": "Metallic rim shot with short decay",
-            "duration": 0.5,
-            "output_path": os.path.join(current_dir, "percussion", "rim_metal.wav"),
-            "category": "percussion"
-        },
-        # Synths
-        {
-            "prompt": "Deep sub bass with slight saturation and movement",
-            "duration": 2.0,
-            "output_path": os.path.join(current_dir, "synths", "bass_sub.wav"),
-            "category": "synths"
-        },
-        {
-            "prompt": "Acid-style bass sequence with resonant filter movement",
-            "duration": 4.0,
-            "output_path": os.path.join(current_dir, "synths", "bass_acid.wav"),
-            "category": "synths"
-        },
-        # Pads
-        {
-            "prompt": "Warm atmospheric pad with subtle modulation",
-            "duration": 8.0,
-            "output_path": os.path.join(current_dir, "pads", "pad_warm.wav"),
-            "category": "pads"
-        },
-        {
-            "prompt": "Dark evolving texture with granular character",
-            "duration": 8.0,
-            "output_path": os.path.join(current_dir, "pads", "pad_dark.wav"),
-            "category": "pads"
-        },
-        # FX
-        {
-            "prompt": "Rising tension build with metallic resonance",
-            "duration": 4.0,
-            "output_path": os.path.join(current_dir, "fx", "riser_metal.wav"),
-            "category": "fx"
-        },
-        {
-            "prompt": "Impact hit with long reverb tail",
-            "duration": 2.0,
-            "output_path": os.path.join(current_dir, "fx", "impact_reverb.wav"),
-            "category": "fx"
-        }
-    ]
+    """
+    Generate a plan for a complete sample pack.
     
-    # Create directories if they don't exist
-    categories = set(sample["category"] for sample in sample_definitions)
-    for category in categories:
-        os.makedirs(os.path.join(current_dir, category), exist_ok=True)
-    
-    return sample_definitions
+    Args:
+        genre: The genre template to use. Available genres can be found with get_available_genres()
+        
+    Returns:
+        List of sample definitions
+    """
+    try:
+        # Get the sample definitions from the genre template
+        sample_definitions = get_template_for_genre(genre)
+        print(f"Using {genre} template with {len(sample_definitions)} samples")
+        return sample_definitions
+    except ValueError as e:
+        # If the genre isn't supported, fall back to techno
+        print(f"Warning: {str(e)}. Falling back to techno template.")
+        return get_template_for_genre("techno")
 
 class WorkflowManager:
     def __init__(self):
@@ -441,17 +360,55 @@ def run_agent_with_prompt(prompt: str, genre: str = "techno"):
     return final_state
 
 if __name__ == "__main__":
-    print("Generating complete sample pack...")
-    result = run_agent_with_prompt("Generate a complete techno sample pack", genre="techno")
+    # Get available genres
+    available_genres = get_available_genres()
+    
+    # Let user select a genre
+    print("\nStablePackGen - Audio Sample Pack Generator")
+    print("========================================")
+    print("\nAvailable genres:")
+    for i, genre in enumerate(available_genres):
+        print(f"{i+1}. {genre.title()}")
+    
+    # Get user selection
+    while True:
+        try:
+            choice = input(f"\nSelect a genre (1-{len(available_genres)}) or enter genre name: ")
+            
+            # Try to parse as number
+            try:
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(available_genres):
+                    selected_genre = available_genres[choice_idx]
+                    break
+                else:
+                    print(f"Please enter a number between 1 and {len(available_genres)}")
+            except ValueError:
+                # Try as a direct genre name
+                if choice.lower() in available_genres:
+                    selected_genre = choice.lower()
+                    break
+                else:
+                    print(f"Unknown genre: {choice}. Available genres: {', '.join(available_genres)}")
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            sys.exit(0)
+    
+    print(f"\nGenerating complete {selected_genre} sample pack...")
+    result = run_agent_with_prompt(f"Generate a complete {selected_genre} sample pack", genre=selected_genre)
     
     print("\nSample pack generation complete!")
-    print("\nSamples by category:")
+    print(f"\nSamples in {selected_genre} pack by category:")
     
     # Group samples by category
     samples_by_category = {}
     for action in result["actions"]:
         path = action.tool_input["output_path"]
-        category = path.split(os.sep)[1]  # Get category from path, platform-independent
+        # Get the relevant parts of the path
+        path_parts = path.split(os.sep)
+        # The category should be the last directory before the filename
+        category = path_parts[-2]
+        
         if category not in samples_by_category:
             samples_by_category[category] = []
         samples_by_category[category].append(os.path.basename(path))
