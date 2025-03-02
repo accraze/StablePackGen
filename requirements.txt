@@ -212,3 +212,4 @@ wget==3.2
 x-transformers==1.26.6
 yarl==1.18.3
 zstandard==0.23.0
+pyloudnorm==0.1.1

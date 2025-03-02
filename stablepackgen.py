@@ -18,6 +18,9 @@ from einops import rearrange
 from stable_audio_tools import get_pretrained_model
 from stable_audio_tools.inference.generation import generate_diffusion_cond
 
+# Import audio processor for post-processing
+from audio_processor import AudioProcessor, get_default_processing_options
+
 # Define state types
 class AgentState(TypedDict):
     messages: List[Any]
@@ -217,6 +220,8 @@ class WorkflowManager:
         self.audio_gen = AudioGenerator()
         self.llm = self._setup_llm()
         self.tools_node = self._setup_tools()
+        self.audio_processor = AudioProcessor()
+        self.processing_options = get_default_processing_options()
     
     def _setup_llm(self):
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -288,12 +293,29 @@ class WorkflowManager:
         if last_action.tool == "generate_audio":
             # Directly call the function with unpacked parameters
             result = self.audio_gen.generate_audio_sample(**last_action.tool_input)
+            
+            # Get current sample info
+            current_sample = state["samples_to_generate"][state["current_sample_index"] - 1]
+            output_path = current_sample["output_path"]
+            category = current_sample["category"]
+            
+            # Apply post-processing
+            try:
+                # Get processing options for this category
+                category_options = self.processing_options.get(
+                    category, self.processing_options.get("default", {})
+                )
+                
+                if category_options:
+                    print(f"Applying post-processing to {os.path.basename(output_path)}...")
+                    self.audio_processor.process_sample(output_path, processing_options=category_options)
+                    print(f"Post-processing complete: {os.path.basename(output_path)}")
+            except Exception as e:
+                print(f"Warning: Post-processing failed for {output_path}: {str(e)}")
+            
+            print(f"\nGenerated {category}: {os.path.abspath(output_path)}")
         else:
             result = f"Unknown tool: {last_action.tool}"
-        
-        # Get current sample info
-        current_sample = state["samples_to_generate"][state["current_sample_index"] - 1]
-        print(f"\nGenerated {current_sample['category']}: {os.path.abspath(current_sample['output_path'])}")
         
         return {
             "messages": state["messages"] + [AIMessage(content=str(result))],
@@ -360,42 +382,97 @@ def run_agent_with_prompt(prompt: str, genre: str = "techno"):
     return final_state
 
 if __name__ == "__main__":
+    import argparse
+    
+    # Set up command-line argument parser
+    parser = argparse.ArgumentParser(description="StablePackGen - Audio Sample Pack Generator")
+    parser.add_argument("--genre", help="Genre to generate (e.g., techno, house, ambient, drum_and_bass)")
+    parser.add_argument("--no-post-processing", action="store_true", help="Disable audio post-processing")
+    parser.add_argument("--processing-preset", choices=["default", "aggressive", "subtle"], 
+                       default="default", help="Post-processing preset to use")
+    
+    args = parser.parse_args()
+    
     # Get available genres
     available_genres = get_available_genres()
     
-    # Let user select a genre
-    print("\nStablePackGen - Audio Sample Pack Generator")
-    print("========================================")
-    print("\nAvailable genres:")
-    for i, genre in enumerate(available_genres):
-        print(f"{i+1}. {genre.title()}")
-    
-    # Get user selection
-    while True:
-        try:
-            choice = input(f"\nSelect a genre (1-{len(available_genres)}) or enter genre name: ")
-            
-            # Try to parse as number
+    # If genre is provided via command line, use it
+    if args.genre and args.genre.lower() in available_genres:
+        selected_genre = args.genre.lower()
+    else:
+        # Let user select a genre
+        print("\nStablePackGen - Audio Sample Pack Generator")
+        print("========================================")
+        print("\nAvailable genres:")
+        for i, genre in enumerate(available_genres):
+            print(f"{i+1}. {genre.title()}")
+        
+        # Get user selection
+        while True:
             try:
-                choice_idx = int(choice) - 1
-                if 0 <= choice_idx < len(available_genres):
-                    selected_genre = available_genres[choice_idx]
-                    break
-                else:
-                    print(f"Please enter a number between 1 and {len(available_genres)}")
-            except ValueError:
-                # Try as a direct genre name
-                if choice.lower() in available_genres:
-                    selected_genre = choice.lower()
-                    break
-                else:
-                    print(f"Unknown genre: {choice}. Available genres: {', '.join(available_genres)}")
-        except KeyboardInterrupt:
-            print("\nExiting...")
-            sys.exit(0)
+                choice = input(f"\nSelect a genre (1-{len(available_genres)}) or enter genre name: ")
+                
+                # Try to parse as number
+                try:
+                    choice_idx = int(choice) - 1
+                    if 0 <= choice_idx < len(available_genres):
+                        selected_genre = available_genres[choice_idx]
+                        break
+                    else:
+                        print(f"Please enter a number between 1 and {len(available_genres)}")
+                except ValueError:
+                    # Try as a direct genre name
+                    if choice.lower() in available_genres:
+                        selected_genre = choice.lower()
+                        break
+                    else:
+                        print(f"Unknown genre: {choice}. Available genres: {', '.join(available_genres)}")
+            except KeyboardInterrupt:
+                print("\nExiting...")
+                sys.exit(0)
+    
+    # Show post-processing settings
+    if args.no_post_processing:
+        print("\nPost-processing: Disabled")
+    else:
+        print(f"\nPost-processing: Enabled (Preset: {args.processing_preset})")
     
     print(f"\nGenerating complete {selected_genre} sample pack...")
     result = run_agent_with_prompt(f"Generate a complete {selected_genre} sample pack", genre=selected_genre)
+    
+    # Apply post-processing to the entire sample pack if not disabled
+    if not args.no_post_processing:
+        print("\nApplying post-processing to all samples...")
+        
+        # Get processing options based on preset
+        processor = AudioProcessor()
+        
+        if args.processing_preset == "aggressive":
+            # More extreme processing
+            options = get_default_processing_options()
+            for category, params in options.items():
+                if "stereo_width" in params:
+                    params["stereo_width"] = min(2.0, params["stereo_width"] * 1.3)
+                if "transient_enhance" in params:
+                    params["transient_enhance"] = min(1.0, params["transient_enhance"] * 1.5)
+        elif args.processing_preset == "subtle":
+            # More subtle processing
+            options = get_default_processing_options()
+            for category, params in options.items():
+                if "stereo_width" in params:
+                    params["stereo_width"] = 0.7 + (params["stereo_width"] - 0.7) * 0.5
+                if "transient_enhance" in params:
+                    params["transient_enhance"] = params["transient_enhance"] * 0.5
+        else:
+            # Default processing
+            options = get_default_processing_options()
+        
+        # Process the sample pack
+        try:
+            processed_files = processor.process_sample_pack(selected_genre, options)
+            print(f"Post-processing complete: {len(processed_files)} files processed")
+        except Exception as e:
+            print(f"Error during post-processing: {str(e)}")
     
     print("\nSample pack generation complete!")
     print(f"\nSamples in {selected_genre} pack by category:")
